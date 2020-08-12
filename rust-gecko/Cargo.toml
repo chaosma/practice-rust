@@ -9,6 +9,4 @@ edition = "2018"
 [dependencies]
 async-std = "1.6.2"
 clap = "2.33.2"
-anyhow = "1.0.32"
-thiserror = "1.0"
 surf = "1.0.3"

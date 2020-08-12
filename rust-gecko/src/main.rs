@@ -1,10 +1,29 @@
-pub mod cmd_error;
-
-use anyhow::{Error, Result};
 use async_std::task;
-use clap::{App, Arg};
-use cmd_error::CmdError;
+use clap::{App, Arg, SubCommand};
 use std::collections::HashMap;
+use std::io::{Error, ErrorKind};
+
+macro_rules! hashmap {
+    ($($key: expr => $val: expr), *) => {{
+        let mut map = HashMap::new();
+        $(map.insert($key,$val);)*
+            map
+    }}
+}
+
+// parsing optional params, looks like : k1=v1:k2=v2:k3=v3
+fn parse_optional_params(params: &str) -> Result<HashMap<&str, &str>, Error> {
+    let list: Vec<&str> = params.split(':').collect();
+    let mut params = HashMap::new();
+    for item in list {
+        let pair: Vec<&str> = item.split('=').collect();
+        if pair.len() != 2 {
+            return Err(Error::new(ErrorKind::Other, "Invalid parameter"));
+        }
+        params.insert(pair[0], pair[1]);
+    }
+    Ok(params)
+}
 
 fn request(url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     task::block_on(async {
@@ -15,7 +34,7 @@ fn request(url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync + 
 }
 
 // something looks like: api_url?k1=v1&k2=v2
-fn fill_url_params(api_url: &String, params: &HashMap<String, String>) -> String {
+fn fill_url_params(api_url: &String, params: &HashMap<&str, &str>) -> String {
     let mut url = api_url.clone();
     url.push('?');
     for (k, v) in params {
@@ -24,49 +43,6 @@ fn fill_url_params(api_url: &String, params: &HashMap<String, String>) -> String
     let _ = url.pop();
     println!("api_url = {}", url);
     url
-}
-
-// Coins command params looks like: k1=v1:k2=v2:k3=v3
-// required keys: id
-fn parse_coins_cmd(params: &String) -> Result<HashMap<String, String>, Error> {
-    let list: Vec<&str> = params.split(':').collect();
-
-    let mut params = HashMap::new();
-    for item in list {
-        let pair: Vec<&str> = item.split('=').collect();
-        if pair.len() != 2 {
-            return Err(CmdError::CoinsCmdError.into());
-        }
-        params.insert(pair[0].to_string(), pair[1].to_string());
-    }
-    if !params.contains_key("id") {
-        return Err(CmdError::CoinsCmdError.into());
-    }
-    Ok(params)
-}
-
-// simple command params looks like: k1=v1:k2=v2:k3=v3
-// required keys: ids and vs_currencies
-// here we will use the same spec (comma separated symbols) of the value of ids and vs_currencies
-// so that we don't need to treat value specifically
-fn parse_simple_cmd(params: &String) -> Result<HashMap<String, String>, Error> {
-    let list: Vec<&str> = params.split(':').collect();
-    if list.len() <= 1 {
-        return Err(CmdError::SimpleCmdError.into());
-    }
-
-    let mut params = HashMap::new();
-    for item in list {
-        let pair: Vec<&str> = item.split('=').collect();
-        if pair.len() != 2 {
-            return Err(CmdError::SimpleCmdError.into());
-        }
-        params.insert(pair[0].to_string(), pair[1].to_string());
-    }
-    if !params.contains_key("ids") || !params.contains_key("vs_currencies") {
-        return Err(CmdError::SimpleCmdError.into());
-    }
-    Ok(params)
 }
 
 fn main() {
@@ -79,23 +55,46 @@ fn main() {
                 .long("ping")
                 .help("check api server status"),
         )
-        .arg(
-            Arg::with_name("coins")
-                .short("c")
-                .long("coins")
+        .subcommand(
+            SubCommand::with_name("coins")
                 .help("Get token information. Format of params: key-value pairs separated by colon. \
                         The CoinGecko API required keys are 'id'.  Detail info at: https://www.coingecko.com/api/documentations/v3#/coins. \
-                        For example:  id=bitcoin:localization=false:tickers=false:market_data=false:community_data=false")
-                .takes_value(true),
+                        For example:  -i bitcoin -o localization=true:tickers=false:market_data=false:community_data=false")
+                .arg(Arg::with_name("id")
+                       .short("i")
+                       .takes_value(true)
+                       .required(true)
+                       .help("token symbol, e.g. -i btc")
+                )
+                .arg(Arg::with_name("option")
+                       .short("o")
+                       .takes_value(true)
+                       .help("optional parameters, e.g. -o localization=true:tickers=false:market_data=false:community_data=false")
+                )
         )
-        .arg(
-            Arg::with_name("simple")
-                 .short("s")
-                 .long("simple")
+        .subcommand(
+            SubCommand::with_name("simple")
                  .help("Get token price, marketcap etc. Format of params: key-value pairs separated by colon. \
                         The CoinGecko API required keys are 'ids' and 'vs_currencies'. Detail info at: https://www.coingecko.com/api/documentations/v3#/simple. \
-                        For example:  ids=bitcoin,ethereum:vs_currencies=usd:include_market_cap=true")
-                 .takes_value(true),
+                        For example:  -i bitcoin,ethereum -v usd -o include_market_cap=true:include_24hr_vol=true")
+                 .arg(Arg::with_name("ids")
+                        .short("i")
+                        .takes_value(true)
+                        .required(true)
+                        .help("token list, comma separated. e.g. -i bitcoin,ethereum")
+                 )
+                 .arg(Arg::with_name("vs_currencies")
+                        .short("v")
+                        .takes_value(true)
+                        .required(true)
+                        .help("vs currencies, comma separated. e.g. -v usd")
+                 )
+                 .arg(Arg::with_name("option")
+                       .short("o")
+                       .takes_value(true)
+                       .help("optional parameters, e.g. -o include_market_cap=true")
+                )
+
         )
         .get_matches();
 
@@ -105,32 +104,52 @@ fn main() {
         let _ = request(url);
     }
 
-    if let Some(params) = matches.value_of("simple") {
-        match parse_simple_cmd(&params.to_string()) {
-            Ok(params) => {
-                let api_url = format!("{}simple/price", api_base_url);
-                let url = fill_url_params(&api_url, &params);
-                let _ = request(url);
-            }
-            Err(e) => {
-                println!("parse_simple_cmd error = {}", e);
-                return;
+    if let Some(matches) = matches.subcommand_matches("simple") {
+        let ids = matches.value_of("ids").unwrap();
+        let vs_currencies = matches.value_of("vs_currencies").unwrap();
+        let mut params = hashmap!["include_market_cap"=>"true"];
+        params.insert("ids", &ids);
+        params.insert("vs_currencies", &vs_currencies);
+
+        if let Some(pp) = matches.value_of("option") {
+            match parse_optional_params(pp) {
+                Ok(pp) => {
+                    for (k, v) in pp {
+                        params.insert(k, v);
+                    }
+                }
+                Err(e) => {
+                    println!("parse_optional_params error = {}", e);
+                    return;
+                }
             }
         }
+
+        let api_url = format!("{}simple/price", api_base_url);
+        let url = fill_url_params(&api_url, &params);
+        let _ = request(url);
     }
 
-    if let Some(params) = matches.value_of("coins") {
-        match parse_coins_cmd(&params.to_string()) {
-            Ok(mut params) => {
-                let coin = params.remove("id").unwrap(); // id exists because we have checked
-                let api_url = format!("{}coins/{}", api_base_url, coin);
-                let url = fill_url_params(&api_url, &params);
-                let _ = request(url);
-            }
-            Err(e) => {
-                println!("parse_coins_cmd error = {}", e);
-                return;
+    if let Some(matches) = matches.subcommand_matches("coins") {
+        let id = matches.value_of("id").unwrap();
+        let mut params = hashmap!["localization"=>"false","tickers"=>"false","market_data"=>"false","community_data"=>"false"];
+
+        if let Some(pp) = matches.value_of("option") {
+            match parse_optional_params(pp) {
+                Ok(pp) => {
+                    for (k, v) in pp {
+                        params.insert(k, v);
+                    }
+                }
+                Err(e) => {
+                    println!("parse_optional_params error = {}", e);
+                    return;
+                }
             }
         }
+
+        let api_url = format!("{}coins/{}", api_base_url, id);
+        let url = fill_url_params(&api_url, &params);
+        let _ = request(url);
     }
 }
