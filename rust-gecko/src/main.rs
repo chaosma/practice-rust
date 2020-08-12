@@ -1,7 +1,6 @@
 use async_std::task;
 use clap::{App, Arg, SubCommand};
 use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
 
 macro_rules! hashmap {
     ($($key: expr => $val: expr), *) => {{
@@ -11,18 +10,16 @@ macro_rules! hashmap {
     }}
 }
 
-// parsing optional params, looks like : k1=v1:k2=v2:k3=v3
-fn parse_optional_params(params: &str) -> Result<HashMap<&str, &str>, Error> {
-    let list: Vec<&str> = params.split(':').collect();
-    let mut params = HashMap::new();
+// parsing and update optional params, looks like : k1=v1:k2=v2:k3=v3
+fn update_optional_params<'a>(optional: &'a str, params: &mut HashMap<&'a str, &'a str>) {
+    let list: Vec<&str> = optional.split(':').collect();
     for item in list {
         let pair: Vec<&str> = item.split('=').collect();
         if pair.len() != 2 {
-            return Err(Error::new(ErrorKind::Other, "Invalid parameter"));
+            continue;
         }
         params.insert(pair[0], pair[1]);
     }
-    Ok(params)
 }
 
 fn request(url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -108,21 +105,11 @@ fn main() {
         let ids = matches.value_of("ids").unwrap();
         let vs_currencies = matches.value_of("vs_currencies").unwrap();
         let mut params = hashmap!["include_market_cap"=>"true"];
+
         params.insert("ids", &ids);
         params.insert("vs_currencies", &vs_currencies);
-
-        if let Some(pp) = matches.value_of("option") {
-            match parse_optional_params(pp) {
-                Ok(pp) => {
-                    for (k, v) in pp {
-                        params.insert(k, v);
-                    }
-                }
-                Err(e) => {
-                    println!("parse_optional_params error = {}", e);
-                    return;
-                }
-            }
+        if let Some(optional) = matches.value_of("option") {
+            update_optional_params(optional, &mut params);
         }
 
         let api_url = format!("{}simple/price", api_base_url);
@@ -134,18 +121,8 @@ fn main() {
         let id = matches.value_of("id").unwrap();
         let mut params = hashmap!["localization"=>"false","tickers"=>"false","market_data"=>"false","community_data"=>"false"];
 
-        if let Some(pp) = matches.value_of("option") {
-            match parse_optional_params(pp) {
-                Ok(pp) => {
-                    for (k, v) in pp {
-                        params.insert(k, v);
-                    }
-                }
-                Err(e) => {
-                    println!("parse_optional_params error = {}", e);
-                    return;
-                }
-            }
+        if let Some(optional) = matches.value_of("option") {
+            update_optional_params(optional, &mut params);
         }
 
         let api_url = format!("{}coins/{}", api_base_url, id);
