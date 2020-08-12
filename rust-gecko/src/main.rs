@@ -2,6 +2,7 @@ use async_std::task;
 use clap::{App, Arg, SubCommand};
 use std::collections::HashMap;
 
+// convenient to initialize hashmap
 macro_rules! hashmap {
     ($($key: expr => $val: expr), *) => {{
         let mut map = HashMap::new();
@@ -10,7 +11,15 @@ macro_rules! hashmap {
     }}
 }
 
-// parsing and update optional params, looks like : k1=v1:k2=v2:k3=v3
+// pretty print string returned from CoinGeckoAPI
+fn pprint(res: &str) -> serde_json::Result<()> {
+    let res: serde_json::Value = serde_json::from_str(&res)?;
+    println!("{}", serde_json::to_string_pretty(&res).unwrap());
+    Ok(())
+}
+
+// parsing optional parameter string and update params accordingly
+// optional is a string looks like : "k1=v1:k2=v2:k3=v3"
 fn update_optional_params<'a>(optional: &'a str, params: &mut HashMap<&'a str, &'a str>) {
     let list: Vec<&str> = optional.split(':').collect();
     for item in list {
@@ -22,15 +31,15 @@ fn update_optional_params<'a>(optional: &'a str, params: &mut HashMap<&'a str, &
     }
 }
 
-fn request(url: String) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+// https request to CoinGecko API v3
+fn request(url: String) -> Result<String, Box<dyn std::error::Error + Send + Sync + 'static>> {
     task::block_on(async {
         let res = surf::get(url).recv_string().await?;
-        println!("{}", res);
-        Ok(())
+        Ok(res)
     })
 }
 
-// something looks like: api_url?k1=v1&k2=v2
+// add params into url query string, return looks like: "api_url?k1=v1&k2=v2"
 fn fill_url_params(api_url: &String, params: &HashMap<&str, &str>) -> String {
     let mut url = api_url.clone();
     url.push('?');
@@ -96,37 +105,50 @@ fn main() {
         .get_matches();
 
     let api_base_url = "https://api.coingecko.com/api/v3/";
+
+    // handle ping cmd
     if matches.is_present("ping") {
         let url = format!("{}{}", api_base_url, "ping");
-        let _ = request(url);
+        let res = request(url).unwrap_or("{}".to_string());
+        let _ = pprint(&res);
     }
 
+    // handle simple subcmd
     if let Some(matches) = matches.subcommand_matches("simple") {
-        let ids = matches.value_of("ids").unwrap();
-        let vs_currencies = matches.value_of("vs_currencies").unwrap();
+        // set default parameters
         let mut params = hashmap!["include_market_cap"=>"true"];
 
+        //update required parameters
+        let ids = matches.value_of("ids").unwrap();
+        let vs_currencies = matches.value_of("vs_currencies").unwrap();
         params.insert("ids", &ids);
         params.insert("vs_currencies", &vs_currencies);
+        // update optional params
         if let Some(optional) = matches.value_of("option") {
             update_optional_params(optional, &mut params);
         }
 
         let api_url = format!("{}simple/price", api_base_url);
         let url = fill_url_params(&api_url, &params);
-        let _ = request(url);
+        let res = request(url).unwrap_or("{}".to_string());
+        let _ = pprint(&res);
     }
 
+    // handle coins subcommand
     if let Some(matches) = matches.subcommand_matches("coins") {
-        let id = matches.value_of("id").unwrap();
+        // set default parameters
         let mut params = hashmap!["localization"=>"false","tickers"=>"false","market_data"=>"false","community_data"=>"false"];
 
+        // required parameter, will put into url directly later
+        let id = matches.value_of("id").unwrap();
+        // update optional params
         if let Some(optional) = matches.value_of("option") {
             update_optional_params(optional, &mut params);
         }
 
         let api_url = format!("{}coins/{}", api_base_url, id);
         let url = fill_url_params(&api_url, &params);
-        let _ = request(url);
+        let res = request(url).unwrap_or("{}".to_string());
+        let _ = pprint(&res);
     }
 }
