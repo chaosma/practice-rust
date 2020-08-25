@@ -39,6 +39,7 @@ decl_event!(
 	{
 		ClaimCreated(AccountId, Vec<u8>),
 		ClaimRevoked(AccountId, Vec<u8>),
+		ClaimTransferred(AccountId, Vec<u8>, AccountId),
 	}
 );
 
@@ -81,6 +82,19 @@ decl_module! {
 
 			Self::deposit_event(RawEvent::ClaimRevoked(sender, claim));
 			Ok(())
+		}
+
+		#[weight = 10_1000]
+		pub fn transfer_claim(origin, claim:Vec<u8>, to: T::AccountId) -> dispatch::DispatchResult
+		{
+			let sender = ensure_signed(origin)?;
+			ensure!(Proofs::<T>::contains_key(&claim), Error::<T>::ClaimNotExist);
+			let (owner, _block_number) = Proofs::<T>::get(&claim);
+			ensure!(owner == sender, Error::<T>::NotClaimOwner);
+			Proofs::<T>::insert(&claim, (to.clone(), frame_system::Module::<T>::block_number())); // should we use original blockNum or current blockNum
+			Self::deposit_event(RawEvent::ClaimTransferred(sender,claim,to));
+			Ok(())
+
 		}
 	}
 }
